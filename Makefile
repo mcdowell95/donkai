@@ -9,16 +9,16 @@ setup: ## Install dependencies
 	pnpm install
 
 start: ## Start orchestrator + dashboard together
-	@set -a; . ./.env; set +a; pnpm start
+	@pnpm start
 
 dev: ## Same as start, with auto-reload on file change
-	@set -a; . ./.env; set +a; pnpm dev
+	@pnpm dev
 
 orchestrator: ## Run orchestrator only
-	@set -a; . ./.env; set +a; pnpm orchestrator
+	@pnpm orchestrator
 
 dashboard: ## Run dashboard only
-	@set -a; . ./.env; set +a; pnpm dashboard
+	@pnpm dashboard
 
 typecheck: ## Static type-check the project
 	pnpm typecheck
