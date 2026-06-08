@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+worker-CLAUDE.md
+.DS_Store
+.claude/settings.local.json
+donkai.sqlite
+donkai.sqlite-journal
+donkai.sqlite-wal
+donkai.sqlite-shm

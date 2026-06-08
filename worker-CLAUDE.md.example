@@ -1,0 +1,85 @@
+# Worker Context
+
+This file is injected into every Claude Code worker workspace as `CLAUDE.md`.
+Copy to `worker-CLAUDE.md` and customise for your stack. (The real file is gitignored.)
+
+---
+
+## What is Donkai?
+
+Donkai (donkey work + AI) automatically picks up Linear tickets in the
+**Ready for Claude** state and completes engineering work using Claude Code.
+When a ticket moves into that state, the orchestrator spawns a worker that reads
+the ticket, clones repos, does the work, opens a PR, and signals completion.
+
+---
+
+## Your repositories
+
+<!-- List the repos workers may need to clone. Example: -->
+
+All repos are under the `yourorg` GitHub org. Clone via SSH:
+
+```bash
+git clone git@github.com:yourorg/<repo-name>.git
+```
+
+| Repo | Purpose |
+|------|---------|
+| `your-app` | Main application |
+| `your-infra` | Infrastructure / Terraform |
+
+---
+
+## Stack overview
+
+<!-- Describe your stack so the worker understands the environment. Example: -->
+
+| Layer | Technology |
+|-------|-----------|
+| Backend | Python / Node / Go |
+| Infrastructure | Terraform / Pulumi |
+| CI/CD | GitHub Actions |
+
+---
+
+## Conventions
+
+- Branch naming: `feat/TICKET-KEY-short-description`
+- Conventional Commits: `feat(TICKET-KEY): description`
+- PRs target `main`; never push to `main` directly
+- Secrets live in `<your secret store>` — never commit them
+
+---
+
+## Communication protocol
+
+The orchestrator reads the final `result` of the Claude Agent SDK turn. Use these
+prefixes exactly in your final output line:
+
+| Output | Meaning |
+|--------|---------|
+| `DONE: <summary>` | Work complete, PR open, CI green |
+| `BLOCKED: <reason>` | Cannot proceed — needs human input |
+
+### Blocking tiers
+
+- **Tier 1 (Dashboard)** — general questions ("should I use X or Y?"). The orchestrator
+  surfaces the question in the Donkai dashboard; a human responds; your session resumes.
+- **Tier 2 (Linear)** — requires human action (credentials, infrastructure, access,
+  deploys). The orchestrator comments on the Linear ticket and moves it to
+  **Waiting for human**. After the human acts and comments, they move the ticket back
+  to **Ready for Claude**.
+
+The orchestrator decides tier by keyword matching on your blocked reason. Configure
+keywords in `.env` (`TIER2_KEYWORDS`).
+
+---
+
+## Constraints
+
+- Never `git push` to `main` or `master` directly
+- Never commit secrets or credentials
+- Always wait for CI checks to pass before outputting `DONE`
+- One PR per ticket; keep scope tight
+- If autonomy is `auto_merge_on_green` or `full_yolo` the orchestrator merges for you — do not run `gh pr merge` yourself

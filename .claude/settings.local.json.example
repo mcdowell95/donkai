@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash(pnpm *)",
+      "Bash(node *)",
+      "Bash(tsx *)",
+      "Bash(npm *)",
+      "Bash(git *)",
+      "Bash(ls*)",
+      "Bash(cat *)"
+    ],
+    "deny": ["Bash(sudo *)", "Bash(rm -rf /*)"]
+  }
+}
