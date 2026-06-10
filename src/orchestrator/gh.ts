@@ -210,3 +210,33 @@ export function ownerRepoFromPrUrl(prUrl: string): string | null {
   const m = prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull\/\d+/);
   return m ? m[1]! : null;
 }
+
+// Force-update a branch ref to point at the given SHA. Used to rebuild `dev`
+// from `main` after the rolling promotion PR is merged, so `dev` never drifts
+// from `main` and future feature merges don't accumulate phantom conflicts.
+export function resetBranchToSha(
+  ownerRepo: string,
+  branch: string,
+  sha: string,
+): { ok: boolean; reason?: string } {
+  try {
+    execFileSync(
+      "gh",
+      [
+        "api",
+        "-X",
+        "PATCH",
+        `repos/${ownerRepo}/git/refs/heads/${branch}`,
+        "-f",
+        `sha=${sha}`,
+        "-F",
+        "force=true",
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: msg };
+  }
+}

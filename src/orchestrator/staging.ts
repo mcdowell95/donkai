@@ -26,6 +26,7 @@ import {
   getPrInfo,
   mergeFeaturePr,
   ownerRepoFromPrUrl,
+  resetBranchToSha,
   updatePrBody,
   type RollingPrInfo,
 } from "./gh.js";
@@ -333,17 +334,19 @@ export async function pollRollingMainPrs(): Promise<void> {
       console.log(
         `  🚀 rolling ${row.repo} #${row.pr_number} merged — starting prod promotion pipeline`,
       );
+      const mergeSha = info.mergeCommitOid ?? config.workflow.mainBranch;
       enqueueProdPromotion({
         repo: row.repo,
         prUrl: info.url,
         ticketKeys,
-        mergeSha: info.mergeCommitOid ?? config.workflow.mainBranch,
+        mergeSha,
       });
       logEvent(null, "rolling_main_pr_merged", {
         repo: row.repo,
         prUrl: info.url,
         tickets: ticketKeys,
       });
+      await rebuildDevFromMain(row.repo, mergeSha);
     } else {
       console.log(
         `  ⚠️  rolling ${row.repo} #${row.pr_number} closed without merge — ${ticketKeys.length} tickets left in Review`,
@@ -355,6 +358,34 @@ export async function pollRollingMainPrs(): Promise<void> {
       });
     }
     db().prepare("DELETE FROM rolling_main_prs WHERE repo = ?").run(row.repo);
+  }
+}
+
+async function rebuildDevFromMain(
+  repo: string,
+  mainSha: string,
+): Promise<void> {
+  const devBranch = config.workflow.devBranch;
+  const result = resetBranchToSha(repo, devBranch, mainSha);
+  if (result.ok) {
+    console.log(
+      `  🔄 ${repo} reset \`${devBranch}\` to \`${mainSha}\` (post rolling-PR merge)`,
+    );
+    logEvent(null, "dev_branch_reset_to_main", {
+      repo,
+      devBranch,
+      sha: mainSha,
+    });
+  } else {
+    console.warn(
+      `  ⚠️  ${repo} failed to reset \`${devBranch}\` to main: ${result.reason}`,
+    );
+    logEvent(null, "dev_branch_reset_failed", {
+      repo,
+      devBranch,
+      sha: mainSha,
+      reason: result.reason,
+    });
   }
 }
 
