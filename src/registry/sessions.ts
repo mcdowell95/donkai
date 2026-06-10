@@ -6,6 +6,8 @@ export type WorkerStatus =
   | "running"
   | "suspended_local"
   | "suspended_linear"
+  | "awaiting_dev_deploy"
+  | "awaiting_dev_redeploy"
   | "awaiting_review"
   | "detached"
   | "merged"
@@ -143,42 +145,61 @@ export function activeReposRunning(): Set<string> {
 }
 
 // Statuses that hold up a sequential slot — prior work isn't finalized yet,
-// so starting a new worker risks branching off a stale main and conflicting
-// at merge time. `merged`, `done`, `error`, `queued` are not blocking.
-const SEQUENTIAL_BLOCKING_STATUSES = [
+// so starting a new worker risks branching off a stale base and conflicting
+// at merge time. `merged`, `done`, `error`, `queued` are never blocking.
+//
+// In `staging_promote` workflow, `awaiting_review` means "merged to dev,
+// deployed to dev, waiting for human to merge dev->main" — that's the
+// deliberate parking state and must NOT block the queue. Callers pass the
+// set they want via `blockingStatuses`.
+export const BASE_BLOCKING_STATUSES = [
   "pending",
   "running",
   "suspended_local",
   "suspended_linear",
-  "awaiting_review",
+  "awaiting_dev_deploy",
+  "awaiting_dev_redeploy",
   "detached",
 ] as const;
 
-export function blockingCount(): number {
-  const placeholders = SEQUENTIAL_BLOCKING_STATUSES.map(() => "?").join(",");
-  return db()
-    .prepare<string[], { c: number }>(
-      `SELECT COUNT(*) AS c FROM sessions WHERE status IN (${placeholders})`,
-    )
-    .get(...SEQUENTIAL_BLOCKING_STATUSES)!.c;
+function placeholders(arr: readonly string[]): string {
+  return arr.map(() => "?").join(",");
 }
 
-export function blockingSessions(): WorkerState[] {
-  const placeholders = SEQUENTIAL_BLOCKING_STATUSES.map(() => "?").join(",");
+export function blockingCount(statuses: readonly string[]): number {
+  if (statuses.length === 0) return 0;
+  return db()
+    .prepare<string[], { c: number }>(
+      `SELECT COUNT(*) AS c FROM sessions WHERE status IN (${placeholders(statuses)})`,
+    )
+    .get(...statuses)!.c;
+}
+
+export function blockingSessions(statuses: readonly string[]): WorkerState[] {
+  if (statuses.length === 0) return [];
   const rows = db()
     .prepare<string[], SessionRow>(
-      `SELECT * FROM sessions WHERE status IN (${placeholders}) ORDER BY updated_at ASC`,
+      `SELECT * FROM sessions WHERE status IN (${placeholders(statuses)}) ORDER BY updated_at ASC`,
     )
-    .all(...SEQUENTIAL_BLOCKING_STATUSES);
+    .all(...statuses);
   return rows.map(rowToState);
 }
 
-export function blockingReposActive(): Set<string> {
-  const placeholders = SEQUENTIAL_BLOCKING_STATUSES.map(() => "?").join(",");
+export function blockingReposActive(statuses: readonly string[]): Set<string> {
+  if (statuses.length === 0) return new Set();
   const rows = db()
     .prepare<string[], { repo: string | null }>(
-      `SELECT repo FROM sessions WHERE status IN (${placeholders})`,
+      `SELECT repo FROM sessions WHERE status IN (${placeholders(statuses)})`,
     )
-    .all(...SEQUENTIAL_BLOCKING_STATUSES);
+    .all(...statuses);
   return new Set(rows.map((r) => r.repo).filter((r): r is string => !!r));
+}
+
+export function listSessionsByStatus(status: WorkerStatus): WorkerState[] {
+  const rows = db()
+    .prepare<[string], SessionRow>(
+      "SELECT * FROM sessions WHERE status = ? ORDER BY updated_at ASC",
+    )
+    .all(status);
+  return rows.map(rowToState);
 }

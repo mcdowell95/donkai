@@ -16,6 +16,7 @@ const csv = (v: string | undefined): string[] =>
 const Concurrency = z.enum(["parallel", "sequential", "sequential_per_repo"]);
 const Autonomy = z.enum(["review_only", "auto_merge_on_green", "full_yolo"]);
 const RepoInference = z.enum(["label_prefix", "project", "first_line"]);
+const Workflow = z.enum(["direct_main", "staging_promote"]);
 
 function required(name: string): string {
   const v = process.env[name];
@@ -65,6 +66,20 @@ export const config = (() => {
       blockKeywords: csv(process.env.AUTO_MERGE_BLOCK_KEYWORDS).map((s) => s.toLowerCase()),
       ciRetries: Number(process.env.AUTO_MERGE_CI_RETRIES ?? "3"),
     },
+    workflow: {
+      mode: Workflow.parse(process.env.WORKFLOW_MODE ?? "direct_main"),
+      devBranch: process.env.DEV_BRANCH ?? "dev",
+      mainBranch: process.env.MAIN_BRANCH ?? "main",
+      devDeployCheck: process.env.DEV_DEPLOY_CHECK ?? "build-and-push",
+      mainDeployCheck:
+        process.env.MAIN_DEPLOY_CHECK ?? process.env.DEV_DEPLOY_CHECK ?? "build-and-push",
+      devDeployPollSecs: Number(process.env.DEV_DEPLOY_POLL_SECS ?? "30"),
+    },
+    coolify: {
+      baseUrl: (process.env.COOLIFY_BASE_URL ?? "").replace(/\/$/, ""),
+      apiToken: process.env.COOLIFY_API_TOKEN ?? "",
+      deployTimeoutSecs: Number(process.env.COOLIFY_DEPLOY_TIMEOUT_SECS ?? "1200"),
+    },
     dashboard: {
       host: process.env.DASHBOARD_HOST ?? "127.0.0.1",
       port: Number(process.env.DASHBOARD_PORT ?? "8346"),
@@ -78,3 +93,4 @@ export type AppConfig = typeof config;
 export type ConcurrencyMode = z.infer<typeof Concurrency>;
 export type AutonomyLevel = z.infer<typeof Autonomy>;
 export type RepoInferenceMode = z.infer<typeof RepoInference>;
+export type WorkflowMode = z.infer<typeof Workflow>;

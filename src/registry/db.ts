@@ -91,7 +91,72 @@ function migrate(d: Database.Database): void {
       status      TEXT NOT NULL DEFAULT 'pending',  -- pending | accepted | rejected
       created_at  TEXT NOT NULL
     );
+
+    -- Tickets in staging_promote workflow currently in the
+    -- "feature merged to dev → in rolling main PR" pipeline.
+    -- stage: 'awaiting_check'    — feature merged, waiting for dev GHA
+    --        'awaiting_redeploy' — GHA green, Coolify dev redeploy in flight
+    CREATE TABLE IF NOT EXISTS dev_deploy_waits (
+      ticket_key      TEXT PRIMARY KEY,
+      issue_id        TEXT NOT NULL,
+      repo            TEXT NOT NULL,
+      feature_pr_url  TEXT NOT NULL,
+      merge_sha       TEXT,
+      check_name      TEXT NOT NULL,
+      ticket_summary  TEXT,
+      stage           TEXT NOT NULL DEFAULT 'awaiting_check',
+      coolify_deployment_uuid TEXT,
+      stage_entered_at TEXT,
+      created_at      TEXT NOT NULL
+    );
+
+    -- One open dev->main PR per repo, accumulating ticket summaries in its body.
+    -- Created when first ticket reaches "deployed to dev"; closed when human
+    -- merges (or closes without merging).
+    CREATE TABLE IF NOT EXISTS rolling_main_prs (
+      repo         TEXT PRIMARY KEY,
+      pr_number    INTEGER NOT NULL,
+      pr_url       TEXT NOT NULL,
+      ticket_keys  TEXT NOT NULL,  -- JSON array
+      created_at   TEXT NOT NULL,
+      updated_at   TEXT NOT NULL
+    );
+
+    -- Post-merge promotion pipeline: rolling PR is MERGED, now wait for the
+    -- main GHA check + trigger Coolify prod redeploy before closing tickets.
+    -- stage: 'awaiting_main_check'  — main GHA running on merge SHA
+    --        'awaiting_prod_redeploy' — Coolify prod redeploy in flight
+    CREATE TABLE IF NOT EXISTS prod_promotions (
+      repo         TEXT PRIMARY KEY,
+      pr_url       TEXT NOT NULL,
+      merge_sha    TEXT NOT NULL,
+      ticket_keys  TEXT NOT NULL,  -- JSON array
+      check_name   TEXT NOT NULL,
+      stage        TEXT NOT NULL DEFAULT 'awaiting_main_check',
+      coolify_deployment_uuid TEXT,
+      stage_entered_at TEXT,
+      created_at   TEXT NOT NULL
+    );
   `);
+
+  // Lightweight column adds for installs that pre-date the staging_promote
+  // expansion (the CREATE TABLE IF NOT EXISTS above is a no-op then).
+  addColumnIfMissing(d, "dev_deploy_waits", "stage", "TEXT NOT NULL DEFAULT 'awaiting_check'");
+  addColumnIfMissing(d, "dev_deploy_waits", "coolify_deployment_uuid", "TEXT");
+  addColumnIfMissing(d, "dev_deploy_waits", "stage_entered_at", "TEXT");
+}
+
+function addColumnIfMissing(
+  d: Database.Database,
+  table: string,
+  column: string,
+  decl: string,
+): void {
+  const cols = d
+    .prepare<[], { name: string }>(`PRAGMA table_info(${table})`)
+    .all();
+  if (cols.some((c) => c.name === column)) return;
+  d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
 }
 
 export function logEvent(ticketKey: string | null, kind: string, detail?: unknown): void {

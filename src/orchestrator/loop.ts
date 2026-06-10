@@ -22,6 +22,11 @@ import {
   inferRepo,
   pickNextRunnable,
 } from "./queue.js";
+import {
+  pollDevDeploys,
+  pollProdPromotions,
+  pollRollingMainPrs,
+} from "./staging.js";
 
 const inflight = new Set<string>();
 
@@ -31,6 +36,20 @@ export async function startOrchestrator(): Promise<void> {
   console.log(`Teams: ${config.linear.teamKeys.join(", ")}`);
   console.log(`Concurrency: ${config.concurrency.mode} (max ${config.concurrency.maxConcurrent})`);
   console.log(`Autonomy: ${config.autonomy.level}`);
+  console.log(
+    `Workflow: ${config.workflow.mode} (dev=${config.workflow.devBranch}, main=${config.workflow.mainBranch}` +
+      (config.workflow.mode === "staging_promote"
+        ? `, dev-check=${config.workflow.devDeployCheck}, main-check=${config.workflow.mainDeployCheck}`
+        : "") +
+      `)`,
+  );
+  if (config.workflow.mode === "staging_promote") {
+    const coolifyConfigured =
+      config.coolify.baseUrl && config.coolify.apiToken;
+    console.log(
+      `Coolify: ${coolifyConfigured ? config.coolify.baseUrl : "NOT CONFIGURED"} (timeout ${config.coolify.deployTimeoutSecs}s)`,
+    );
+  }
   console.log(`Workspace root: ${config.workspaceRoot}`);
   console.log(`Poll interval: ${config.pollIntervalMs / 1000}s`);
   console.log(`Dashboard: http://${config.dashboard.host}:${config.dashboard.port}`);
@@ -62,6 +81,11 @@ async function tick(): Promise<void> {
   await drainReleaseSignals();
   await drainResponseSignals();
   await checkHumanWaitTickets();
+  if (config.workflow.mode === "staging_promote") {
+    await pollDevDeploys();
+    await pollRollingMainPrs();
+    await pollProdPromotions();
+  }
   await pollReady();
   await pollResumed();
   scheduleFromQueue();
@@ -221,6 +245,7 @@ function redactedConfig(): unknown {
     states: config.states,
     concurrency: config.concurrency,
     autonomy: { ...config.autonomy, repoAllowlist: config.autonomy.repoAllowlist },
+    workflow: config.workflow,
   };
 }
 

@@ -27,6 +27,7 @@ import {
   shouldAttemptAutoMerge,
 } from "./autonomy.js";
 import { inferRepo } from "./queue.js";
+import { startDevDeployWait } from "./staging.js";
 
 export async function handleNewTicket(issue: IssueSummary): Promise<void> {
   const key = issue.identifier;
@@ -189,6 +190,23 @@ async function handleDoneOutcome(
 ): Promise<void> {
   const key = state.ticket_key;
   const summary = extractDoneSummary(result.output);
+
+  if (config.workflow.mode === "staging_promote") {
+    const prUrl = state.pr_urls[0];
+    if (!prUrl) {
+      console.error(
+        `  ❌ ${key} done in staging_promote but no PR URL in output`,
+      );
+      await addComment(
+        issue.id,
+        `🤖 Donkai expected a PR URL on DONE but found none in the worker output. Manual review needed.`,
+      );
+      state.status = "error";
+      return;
+    }
+    await startDevDeployWait({ state, issue, prUrl, summary });
+    return;
+  }
 
   if (shouldAttemptAutoMerge()) {
     const guards = evaluateGuards({

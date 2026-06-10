@@ -10,3 +10,4 @@ donkai.sqlite
 donkai.sqlite-journal
 donkai.sqlite-wal
 donkai.sqlite-shm
+.idea

@@ -7,6 +7,8 @@ const statusColor: Record<string, string> = {
   pending: "queued",
   suspended_local: "needs-input",
   suspended_linear: "blocked",
+  awaiting_dev_deploy: "review",
+  awaiting_dev_redeploy: "review",
   awaiting_review: "review",
   detached: "detached",
   merged: "done",
@@ -76,6 +78,8 @@ function renderActions(s: WorkerState): string {
       return t("release", "Release back to Donkai");
     case "suspended_local":
     case "suspended_linear":
+    case "awaiting_dev_deploy":
+    case "awaiting_dev_redeploy":
     case "awaiting_review":
       return t("takeover", "Takeover");
     default:

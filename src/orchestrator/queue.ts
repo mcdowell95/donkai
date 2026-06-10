@@ -2,6 +2,7 @@ import { config } from "../config.js";
 import { db } from "../registry/db.js";
 import {
   activeCount,
+  BASE_BLOCKING_STATUSES,
   blockingCount,
   blockingReposActive,
   blockingSessions,
@@ -78,14 +79,16 @@ export function pickNextRunnable(): QueueRow[] {
       return rows.slice(0, free);
     }
     case "sequential": {
-      if (blockingCount() > 0) {
-        logBlockedQueue();
+      const blockers = sequentialBlockingStatuses();
+      if (blockingCount(blockers) > 0) {
+        logBlockedQueue(blockers);
         return [];
       }
       return rows.slice(0, 1);
     }
     case "sequential_per_repo": {
-      const busy = blockingReposActive();
+      const blockers = sequentialBlockingStatuses();
+      const busy = blockingReposActive(blockers);
       const picked: QueueRow[] = [];
       const claimed = new Set<string>();
       for (const r of rows) {
@@ -95,7 +98,7 @@ export function pickNextRunnable(): QueueRow[] {
         picked.push(r);
         claimed.add(repo);
       }
-      if (picked.length === 0 && rows.length > 0) logBlockedQueue();
+      if (picked.length === 0 && rows.length > 0) logBlockedQueue(blockers);
       return picked;
     }
   }
@@ -107,16 +110,27 @@ export function queuePosition(ticketKey: string): number | null {
   return idx < 0 ? null : idx + 1;
 }
 
+// In direct_main, `awaiting_review` means PR open against main and unmerged —
+// must block to avoid the second worker branching off a stale main. In
+// staging_promote, `awaiting_review` means "deployed to dev, parked on the
+// rolling main PR for human" — that's intentional and must NOT block.
+function sequentialBlockingStatuses(): readonly string[] {
+  if (config.workflow.mode === "staging_promote") {
+    return BASE_BLOCKING_STATUSES;
+  }
+  return [...BASE_BLOCKING_STATUSES, "awaiting_review"];
+}
+
 let lastBlockedLog = "";
-function logBlockedQueue(): void {
-  const blockers = blockingSessions().map(
+function logBlockedQueue(statuses: readonly string[]): void {
+  const blockers = blockingSessions(statuses).map(
     (s) => `${s.ticket_key}(${s.status})`,
   );
   const msg = blockers.join(", ");
   if (msg === lastBlockedLog) return;
   lastBlockedLog = msg;
   console.log(
-    `  ⏸ queue waiting on prior work to finalize (merge/close): ${msg || "(none)"}`,
+    `  ⏸ queue waiting on prior work to finalize: ${msg || "(none)"}`,
   );
 }
 

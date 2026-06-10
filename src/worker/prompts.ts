@@ -10,6 +10,17 @@ const priorityNames: Record<number, string> = {
 };
 
 export function autonomyInstructionBlock(): string {
+  if (config.workflow.mode === "staging_promote") {
+    return [
+      "## Autonomy: staging_promote",
+      `Open a PR targeting \`${config.workflow.devBranch}\` (NOT \`${config.workflow.mainBranch}\`).`,
+      `After CI is green, output DONE: with the PR URL. Donkai will squash-merge into \`${config.workflow.devBranch}\`,`,
+      `wait for the \`${config.workflow.devDeployCheck}\` deploy check, then append your ticket to the rolling`,
+      `\`${config.workflow.devBranch} → ${config.workflow.mainBranch}\` PR. A human handles the promotion to \`${config.workflow.mainBranch}\`.`,
+      `**Do not open PRs against \`${config.workflow.mainBranch}\` and do not merge anything yourself.**`,
+    ].join("\n");
+  }
+
   const a = config.autonomy;
   switch (a.level) {
     case "review_only":
@@ -40,6 +51,10 @@ export function buildTicketPrompt(issue: IssueSummary): string {
   const commentsBlock = renderComments(issue.comments);
   const autonomy = autonomyInstructionBlock();
   const ident = issue.identifier;
+  const baseBranch =
+    config.workflow.mode === "staging_promote"
+      ? config.workflow.devBranch
+      : config.workflow.mainBranch;
 
   return `You are working on Linear ticket ${ident} (${issue.url}).
 
@@ -58,9 +73,9 @@ ${autonomy}
 1. Tell me your session ID first so I can record it for resume.
 2. Read \`CLAUDE.md\` in this directory for repo context and conventions.
 3. Determine which repos you need. Clone them into this workspace.
-4. Create a feature branch \`feat/${ident.toLowerCase()}-<short-desc>\` from a fresh \`main\`.
+4. Create a feature branch \`feat/${ident.toLowerCase()}-<short-desc>\` from a fresh \`${baseBranch}\` (\`git fetch origin && git checkout ${baseBranch} && git pull --ff-only && git checkout -b feat/...\`).
 5. Implement the work. Commit with clear messages referencing ${ident}.
-6. Open a PR with \`gh pr create\` targeting \`main\`.
+6. Open a PR with \`gh pr create --base ${baseBranch}\`.
 7. Run \`gh pr checks <pr-number> --watch --fail-fast\` after every push. Loop on failure, fix, push, re-check.
 8. You may not output DONE until \`gh pr checks\` exits 0. After three consecutive failed runs (or an unfixable failure), output BLOCKED.
 9. If you cannot proceed without human input, output a single line starting with \`BLOCKED:\` followed by what you need.
