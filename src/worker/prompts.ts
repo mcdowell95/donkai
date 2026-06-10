@@ -18,6 +18,23 @@ export function autonomyInstructionBlock(): string {
       `wait for the \`${config.workflow.devDeployCheck}\` deploy check, then append your ticket to the rolling`,
       `\`${config.workflow.devBranch} → ${config.workflow.mainBranch}\` PR. A human handles the promotion to \`${config.workflow.mainBranch}\`.`,
       `**Do not open PRs against \`${config.workflow.mainBranch}\` and do not merge anything yourself.**`,
+      "",
+      "When you output DONE, ALSO emit two labeled blocks so the rolling promotion PR",
+      "can show testing steps and customer-facing release notes:",
+      "",
+      "```",
+      "DONE: <one-line summary> <PR URL>",
+      "",
+      "TESTING:",
+      "- Concrete, click-by-click steps a teammate can follow on dev to verify the change.",
+      "- Cover the happy path and at least one edge case.",
+      "- Mention any setup (URLs, fixtures, accounts) needed.",
+      "",
+      "RELEASE_NOTES:",
+      "- One short, customer-facing bullet describing what's new or fixed.",
+      "- Write it in plain language — no ticket keys, no internal jargon.",
+      "- Skip the block entirely (omit the RELEASE_NOTES section) if the change is internal-only (refactor, infra, chore).",
+      "```",
     ].join("\n");
   }
 

@@ -35,6 +35,32 @@ export function extractPrUrls(output: string): string[] {
   return Array.from(new Set(output.match(re) ?? []));
 }
 
+// Pulls the markdown block sitting under a `LABEL:` header in worker output.
+// Block ends at the next ALL-CAPS label of the form `WORD:` on a new line, or
+// at end of input. Returns null if the label is absent or the block is empty.
+export function extractLabeledBlock(
+  output: string,
+  label: string,
+): string | null {
+  const headerRe = new RegExp(`(?:^|\\n)${label}:[ \\t]*\\n?`, "i");
+  const headerMatch = output.match(headerRe);
+  if (!headerMatch || headerMatch.index === undefined) return null;
+  const afterLabel = output.slice(headerMatch.index + headerMatch[0].length);
+  const nextLabelIdx = afterLabel.search(/\n[A-Z][A-Z_]+:/);
+  const body =
+    nextLabelIdx < 0 ? afterLabel : afterLabel.slice(0, nextLabelIdx);
+  const trimmed = body.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+export function extractTestingSteps(output: string): string | null {
+  return extractLabeledBlock(output, "TESTING");
+}
+
+export function extractReleaseNotes(output: string): string | null {
+  return extractLabeledBlock(output, "RELEASE_NOTES");
+}
+
 export interface HarvestProposal {
   proposal: string;
   section: string;

@@ -17,7 +17,13 @@ import {
 } from "../registry/sessions.js";
 import { runWorker, type WorkerResult } from "../worker/runner.js";
 import { buildResumePrompt, buildTicketPrompt } from "../worker/prompts.js";
-import { extractBlocked, extractDoneSummary, extractPrUrls } from "../worker/parse.js";
+import {
+  extractBlocked,
+  extractDoneSummary,
+  extractPrUrls,
+  extractReleaseNotes,
+  extractTestingSteps,
+} from "../worker/parse.js";
 import { setupWorkspace, teardownWorkspace } from "./workspace.js";
 import { harvestLearnings } from "./harvest.js";
 import {
@@ -190,6 +196,8 @@ async function handleDoneOutcome(
 ): Promise<void> {
   const key = state.ticket_key;
   const summary = extractDoneSummary(result.output);
+  const testingSteps = extractTestingSteps(result.output);
+  const releaseNotes = extractReleaseNotes(result.output);
 
   if (config.workflow.mode === "staging_promote") {
     const prUrl = state.pr_urls[0];
@@ -204,7 +212,14 @@ async function handleDoneOutcome(
       state.status = "error";
       return;
     }
-    await startDevDeployWait({ state, issue, prUrl, summary });
+    await startDevDeployWait({
+      state,
+      issue,
+      prUrl,
+      summary,
+      testingSteps,
+      releaseNotes,
+    });
     return;
   }
 

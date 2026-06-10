@@ -42,10 +42,22 @@ interface DevDeployWaitRow {
   merge_sha: string | null;
   check_name: string;
   ticket_summary: string | null;
+  testing_steps: string | null;
+  release_notes: string | null;
   stage: DevStage;
   coolify_deployment_uuid: string | null;
   stage_entered_at: string | null;
   created_at: string;
+}
+
+interface RollingPrTicketRow {
+  repo: string;
+  ticket_key: string;
+  ticket_summary: string | null;
+  feature_pr_url: string;
+  testing_steps: string | null;
+  release_notes: string | null;
+  added_at: string;
 }
 
 interface RollingPrRow {
@@ -78,8 +90,10 @@ export async function startDevDeployWait(args: {
   issue: IssueSummary;
   prUrl: string;
   summary: string;
+  testingSteps: string | null;
+  releaseNotes: string | null;
 }): Promise<void> {
-  const { state, issue, prUrl, summary } = args;
+  const { state, issue, prUrl, summary, testingSteps, releaseNotes } = args;
   const key = state.ticket_key;
   const ownerRepo = ownerRepoFromPrUrl(prUrl);
   if (!ownerRepo) {
@@ -102,6 +116,8 @@ export async function startDevDeployWait(args: {
   logEvent(key, "feature_merged_to_dev", {
     prUrl,
     mergeSha: outcome.mergeSha,
+    hasTesting: testingSteps !== null,
+    hasReleaseNotes: releaseNotes !== null,
   });
 
   const now = new Date().toISOString();
@@ -109,12 +125,15 @@ export async function startDevDeployWait(args: {
     .prepare(
       `INSERT INTO dev_deploy_waits
        (ticket_key, issue_id, repo, feature_pr_url, merge_sha, check_name,
-        ticket_summary, stage, coolify_deployment_uuid, stage_entered_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'awaiting_check', NULL, ?, ?)
+        ticket_summary, testing_steps, release_notes,
+        stage, coolify_deployment_uuid, stage_entered_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_check', NULL, ?, ?)
        ON CONFLICT(ticket_key) DO UPDATE SET
          feature_pr_url = excluded.feature_pr_url,
          merge_sha      = excluded.merge_sha,
          ticket_summary = excluded.ticket_summary,
+         testing_steps  = excluded.testing_steps,
+         release_notes  = excluded.release_notes,
          stage          = 'awaiting_check',
          coolify_deployment_uuid = NULL,
          stage_entered_at = excluded.stage_entered_at`,
@@ -127,6 +146,8 @@ export async function startDevDeployWait(args: {
       outcome.mergeSha,
       config.workflow.devDeployCheck,
       summary,
+      testingSteps,
+      releaseNotes,
       now,
       now,
     );
@@ -245,14 +266,6 @@ async function tickDevAwaitingRedeploy(row: DevDeployWaitRow): Promise<void> {
 }
 
 async function onDevPipelineComplete(row: DevDeployWaitRow): Promise<void> {
-  const state = getSession(row.ticket_key);
-  if (!state) {
-    db()
-      .prepare("DELETE FROM dev_deploy_waits WHERE ticket_key = ?")
-      .run(row.ticket_key);
-    return;
-  }
-  const issue = await safeGetIssue(row.issue_id);
   console.log(
     `  ✅ ${row.ticket_key} dev redeploy complete — promoting to rolling main PR`,
   );
@@ -265,21 +278,34 @@ async function onDevPipelineComplete(row: DevDeployWaitRow): Promise<void> {
     return; // next tick retries
   }
 
-  appendTicketToRollingPr(rolling, row);
+  upsertRollingPrTicket(row);
+  rerenderRollingPrBody(row.repo, rolling);
 
   db()
     .prepare("DELETE FROM dev_deploy_waits WHERE ticket_key = ?")
     .run(row.ticket_key);
 
-  state.pr_urls = Array.from(
-    new Set([...state.pr_urls, row.feature_pr_url, rolling.url]),
-  );
-  state.status = "awaiting_review";
-  upsertSession(state);
-  teardownWorkspace(state.workspace_dir);
+  // Best-effort session/Linear cleanup. We must NOT gate the PR-body update on
+  // the session existing — if the worker session was lost (restart, crash) the
+  // rolling PR should still get this ticket. That bug previously caused the
+  // PR body to silently never update.
+  const state = getSession(row.ticket_key);
+  if (state) {
+    state.pr_urls = Array.from(
+      new Set([...state.pr_urls, row.feature_pr_url, rolling.url]),
+    );
+    state.status = "awaiting_review";
+    upsertSession(state);
+    teardownWorkspace(state.workspace_dir);
+  }
 
+  const issue = await safeGetIssue(row.issue_id);
   if (issue) {
-    await transitionIssue(issue.id, config.states.review);
+    try {
+      await transitionIssue(issue.id, config.states.review);
+    } catch {
+      /* ignore — workflow state might not exist */
+    }
     await addComment(
       issue.id,
       `🤖 Deployed to dev (\`${config.workflow.devDeployCheck}\` green, Coolify redeploy finished).\n\nAdded to rolling promotion PR: ${rolling.url}\n\nTest on dev. When happy, merge that PR — Donkai will trigger the prod redeploy automatically.`,
@@ -287,6 +313,7 @@ async function onDevPipelineComplete(row: DevDeployWaitRow): Promise<void> {
   }
   logEvent(row.ticket_key, "promoted_to_rolling_main_pr", {
     rollingPr: rolling.url,
+    sessionMissing: state === undefined || state === null,
   });
 }
 
@@ -358,6 +385,9 @@ export async function pollRollingMainPrs(): Promise<void> {
       });
     }
     db().prepare("DELETE FROM rolling_main_prs WHERE repo = ?").run(row.repo);
+    db()
+      .prepare("DELETE FROM rolling_pr_tickets WHERE repo = ?")
+      .run(row.repo);
   }
 }
 
@@ -624,7 +654,66 @@ function ensureRollingPr(repo: string): RollingPrInfo | null {
 }
 
 function initialRollingPrBody(): string {
-  return [
+  return renderRollingPrBody([]);
+}
+
+// Insert (or replace) the per-ticket content row for the rolling PR. The
+// rolling_pr_tickets table is the source of truth for the body — we re-render
+// from scratch on every change, which makes the operation idempotent and
+// trivial to backfill.
+function upsertRollingPrTicket(row: DevDeployWaitRow): void {
+  db()
+    .prepare(
+      `INSERT INTO rolling_pr_tickets
+         (repo, ticket_key, ticket_summary, feature_pr_url,
+          testing_steps, release_notes, added_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(repo, ticket_key) DO UPDATE SET
+         ticket_summary = excluded.ticket_summary,
+         feature_pr_url = excluded.feature_pr_url,
+         testing_steps  = excluded.testing_steps,
+         release_notes  = excluded.release_notes`,
+    )
+    .run(
+      row.repo,
+      row.ticket_key,
+      row.ticket_summary,
+      row.feature_pr_url,
+      row.testing_steps,
+      row.release_notes,
+      new Date().toISOString(),
+    );
+
+  const stored = db()
+    .prepare<[string], RollingPrRow>(
+      "SELECT * FROM rolling_main_prs WHERE repo = ?",
+    )
+    .get(row.repo);
+  const keys: string[] = stored
+    ? (JSON.parse(stored.ticket_keys) as string[])
+    : [];
+  if (!keys.includes(row.ticket_key)) keys.push(row.ticket_key);
+  db()
+    .prepare(
+      `UPDATE rolling_main_prs
+         SET ticket_keys = ?, updated_at = ?
+       WHERE repo = ?`,
+    )
+    .run(JSON.stringify(keys), new Date().toISOString(), row.repo);
+}
+
+function rerenderRollingPrBody(repo: string, pr: RollingPrInfo): void {
+  const tickets = db()
+    .prepare<[string], RollingPrTicketRow>(
+      `SELECT * FROM rolling_pr_tickets WHERE repo = ? ORDER BY added_at ASC`,
+    )
+    .all(repo);
+  const body = renderRollingPrBody(tickets);
+  updatePrBody(repo, pr.number, body);
+}
+
+function renderRollingPrBody(tickets: RollingPrTicketRow[]): string {
+  const intro = [
     "## Rolling promotion PR",
     "",
     "This PR accumulates changes from `" +
@@ -635,63 +724,88 @@ function initialRollingPrBody(): string {
     "",
     "**Do not merge until all listed changes have been tested on dev.**",
     "On merge, Donkai will wait for the main GHA, trigger a Coolify prod redeploy, then close the listed tickets.",
+  ].join("\n");
+
+  const ticketList = tickets.length
+    ? tickets
+        .map(
+          (t) =>
+            `- **${t.ticket_key}** — ${t.ticket_summary ?? "(no summary)"} _(feature PR: ${t.feature_pr_url})_`,
+        )
+        .join("\n")
+    : "_(none yet)_";
+
+  const testingBlocks = tickets.length
+    ? tickets
+        .map((t) => {
+          const heading = `**${t.ticket_key}** — ${t.ticket_summary ?? "(no summary)"}`;
+          const body = t.testing_steps?.trim().length
+            ? indentBullets(t.testing_steps.trim())
+            : "_(worker did not provide testing steps)_";
+          return `${heading}\n${body}`;
+        })
+        .join("\n\n")
+    : "_(none yet)_";
+
+  const notesBlocks = tickets
+    .filter((t) => t.release_notes?.trim().length)
+    .map((t) => t.release_notes!.trim())
+    .join("\n");
+  const notesSection = notesBlocks.length
+    ? notesBlocks
+    : "_(no customer-facing changes in this batch)_";
+
+  return [
+    intro,
     "",
     "### Included tickets",
     "",
-    "_(none yet)_",
+    TICKETS_MARKER_START,
+    ticketList,
+    TICKETS_MARKER_END,
     "",
-    TICKET_MARKER_START,
-    TICKET_MARKER_END,
+    "### Testing checklist",
+    "",
+    "Work through each ticket on dev before merging.",
+    "",
+    TESTS_MARKER_START,
+    testingBlocks,
+    TESTS_MARKER_END,
+    "",
+    "### Customer release notes",
+    "",
+    "Paste the block below to customers when this batch ships to prod.",
+    "",
+    "```markdown",
+    NOTES_MARKER_START,
+    notesSection,
+    NOTES_MARKER_END,
+    "```",
   ].join("\n");
 }
 
-const TICKET_MARKER_START = "<!-- donkai:tickets-start -->";
-const TICKET_MARKER_END = "<!-- donkai:tickets-end -->";
-
-function appendTicketToRollingPr(
-  pr: RollingPrInfo,
-  row: DevDeployWaitRow,
-): void {
-  const stored = db()
-    .prepare<[string], RollingPrRow>(
-      "SELECT * FROM rolling_main_prs WHERE repo = ?",
-    )
-    .get(row.repo);
-  const keys: string[] = stored
-    ? (JSON.parse(stored.ticket_keys) as string[])
-    : [];
-  if (!keys.includes(row.ticket_key)) keys.push(row.ticket_key);
-
-  const entry = `- **${row.ticket_key}** — ${row.ticket_summary ?? "(no summary)"} _(feature PR: ${row.feature_pr_url})_`;
-  const newBody = injectEntry(pr.body, entry);
-  updatePrBody(row.repo, pr.number, newBody);
-
-  db()
-    .prepare(
-      `UPDATE rolling_main_prs
-         SET ticket_keys = ?, updated_at = ?
-       WHERE repo = ?`,
-    )
-    .run(JSON.stringify(keys), new Date().toISOString(), row.repo);
+// Treat each non-empty line of a worker-supplied testing block as a checklist
+// item. Lines that already start with `- [` are passed through; bullets like
+// `- step` become `- [ ] step`; plain lines also become `- [ ] line`.
+function indentBullets(block: string): string {
+  return block
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      if (/^- \[[ x]\]/i.test(line)) return line;
+      const stripped = line.replace(/^[-*]\s+/, "");
+      return `- [ ] ${stripped}`;
+    })
+    .join("\n");
 }
 
-function injectEntry(body: string, entry: string): string {
-  if (body.includes(TICKET_MARKER_START) && body.includes(TICKET_MARKER_END)) {
-    const before = body.split(TICKET_MARKER_START)[0]!;
-    const between = body
-      .split(TICKET_MARKER_START)[1]!
-      .split(TICKET_MARKER_END)[0]!;
-    const after = body.split(TICKET_MARKER_END)[1] ?? "";
-    const trimmed = between
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .filter((l) => l !== "_(none yet)_");
-    trimmed.push(entry);
-    return `${before}${TICKET_MARKER_START}\n${trimmed.join("\n")}\n${TICKET_MARKER_END}${after}`;
-  }
-  return `${body}\n\n${TICKET_MARKER_START}\n${entry}\n${TICKET_MARKER_END}`;
-}
+const TICKETS_MARKER_START = "<!-- donkai:tickets-start -->";
+const TICKETS_MARKER_END = "<!-- donkai:tickets-end -->";
+const TESTS_MARKER_START = "<!-- donkai:tests-start -->";
+const TESTS_MARKER_END = "<!-- donkai:tests-end -->";
+const NOTES_MARKER_START = "<!-- donkai:notes-start -->";
+const NOTES_MARKER_END = "<!-- donkai:notes-end -->";
 
 // ----------------------------------------------------------------------------
 // Misc
