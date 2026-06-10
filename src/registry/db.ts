@@ -122,6 +122,22 @@ function migrate(d: Database.Database): void {
       updated_at   TEXT NOT NULL
     );
 
+    -- Per-ticket content that backs the rolling PR body. Survives loss of the
+    -- worker session and is the source of truth for re-rendering the PR body.
+    -- Cleared per-repo when the rolling PR is merged or closed.
+    CREATE TABLE IF NOT EXISTS rolling_pr_tickets (
+      repo            TEXT NOT NULL,
+      ticket_key      TEXT NOT NULL,
+      ticket_summary  TEXT,
+      feature_pr_url  TEXT NOT NULL,
+      testing_steps   TEXT,   -- markdown block (bullets), nullable
+      release_notes   TEXT,   -- markdown block (bullets), nullable
+      added_at        TEXT NOT NULL,
+      PRIMARY KEY (repo, ticket_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rolling_pr_tickets_repo
+      ON rolling_pr_tickets(repo, added_at);
+
     -- Post-merge promotion pipeline: rolling PR is MERGED, now wait for the
     -- main GHA check + trigger Coolify prod redeploy before closing tickets.
     -- stage: 'awaiting_main_check'  — main GHA running on merge SHA
@@ -144,6 +160,8 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, "dev_deploy_waits", "stage", "TEXT NOT NULL DEFAULT 'awaiting_check'");
   addColumnIfMissing(d, "dev_deploy_waits", "coolify_deployment_uuid", "TEXT");
   addColumnIfMissing(d, "dev_deploy_waits", "stage_entered_at", "TEXT");
+  addColumnIfMissing(d, "dev_deploy_waits", "testing_steps", "TEXT");
+  addColumnIfMissing(d, "dev_deploy_waits", "release_notes", "TEXT");
 }
 
 function addColumnIfMissing(
