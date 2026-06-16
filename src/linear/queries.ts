@@ -60,16 +60,34 @@ async function expandIssue(issue: Issue): Promise<IssueSummary> {
   };
 }
 
-export async function findReadyIssues(): Promise<IssueSummary[]> {
-  const me = await viewer();
+async function baseScopeFilter(): Promise<Record<string, unknown>> {
   const teams = await teamIds();
+  const filter: Record<string, unknown> = {
+    team: { id: { in: teams } },
+    state: { name: { eq: config.states.ready } },
+  };
+  if (!config.linear.pickupLabel) {
+    const me = await viewer();
+    filter.assignee = { id: { eq: me.id } };
+  }
+  return filter;
+}
+
+function requiredLabelClauses(extra: string[] = []): Array<{ labels: { name: { eq: string } } }> {
+  const names: string[] = [];
+  if (config.linear.pickupLabel) names.push(config.linear.pickupLabel);
+  for (const n of extra) names.push(n);
+  return names.map((name) => ({ labels: { name: { eq: name } } }));
+}
+
+export async function findReadyIssues(): Promise<IssueSummary[]> {
+  const base = await baseScopeFilter();
+  const labelClauses = requiredLabelClauses();
+  const filter: Record<string, unknown> =
+    labelClauses.length > 0 ? { ...base, and: labelClauses } : base;
 
   const issues = await linear().issues({
-    filter: {
-      team: { id: { in: teams } },
-      state: { name: { eq: config.states.ready } },
-      assignee: { id: { eq: me.id } },
-    },
+    filter,
     orderBy: undefined,
     first: 50,
   });
@@ -78,17 +96,16 @@ export async function findReadyIssues(): Promise<IssueSummary[]> {
 }
 
 export async function findResumedIssues(): Promise<IssueSummary[]> {
-  // Tickets back to "Ready for Claude" that carry the cc-suspended label
-  const me = await viewer();
-  const teams = await teamIds();
+  // Tickets back to "Ready for Claude" that carry the cc-suspended label.
+  // When LINEAR_PICKUP_LABEL is set, both labels must be present.
+  const base = await baseScopeFilter();
+  const filter: Record<string, unknown> = {
+    ...base,
+    and: requiredLabelClauses(["cc-suspended"]),
+  };
 
   const issues = await linear().issues({
-    filter: {
-      team: { id: { in: teams } },
-      state: { name: { eq: config.states.ready } },
-      assignee: { id: { eq: me.id } },
-      labels: { name: { eq: "cc-suspended" } },
-    },
+    filter,
     first: 50,
   });
 
