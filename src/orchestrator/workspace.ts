@@ -3,11 +3,13 @@ import { join } from "node:path";
 import { config } from "../config.js";
 
 const SETTINGS = {
+  enableAllProjectMcpServers: true,
   permissions: {
     allow: [
       "Read",
       "Write",
       "Edit",
+      "mcp__*",
       "Bash(git *)",
       "Bash(gh pr create*)",
       "Bash(gh pr view*)",
@@ -104,6 +106,10 @@ export function setupWorkspace(ticketKey: string): string {
 
   if (existsSync(config.workerClaudeMd)) {
     copyFileSync(config.workerClaudeMd, join(workspace, "CLAUDE.md"));
+  }
+
+  if (existsSync(config.workerMcpJson)) {
+    copyFileSync(config.workerMcpJson, join(workspace, ".mcp.json"));
   }
 
   const claudeDir = join(workspace, ".claude");
