@@ -120,6 +120,16 @@ export async function startDevDeployWait(args: {
     hasReleaseNotes: releaseNotes !== null,
   });
 
+  // Move ticket to Review as soon as it lands on dev. Done is reserved for
+  // post-prod. Doing this here (rather than waiting until after the Coolify
+  // dev redeploy finishes) also overrides Linear's GitHub-integration
+  // auto-close, which otherwise flips the ticket to Done on PR merge.
+  try {
+    await transitionIssue(issue.id, config.states.review);
+  } catch {
+    /* ignore — workflow state might not exist */
+  }
+
   const now = new Date().toISOString();
   db()
     .prepare(

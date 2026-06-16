@@ -36,6 +36,7 @@ export const config = (() => {
     linear: {
       apiKey: required("LINEAR_API_KEY"),
       teamKeys,
+      pickupLabel: (process.env.LINEAR_PICKUP_LABEL ?? "").trim(),
     },
     states: {
       ready: process.env.STATE_READY ?? "Ready for Claude",
