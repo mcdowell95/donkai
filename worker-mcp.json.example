@@ -7,6 +7,13 @@
         "Authorization": "Bearer YOUR_LINEAR_OAUTH_TOKEN"
       }
     },
+    "sentry": {
+      "type": "http",
+      "url": "https://mcp.sentry.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_SENTRY_OAUTH_TOKEN"
+      }
+    },
     "playwright": {
       "type": "stdio",
       "command": "npx",
