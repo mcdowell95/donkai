@@ -49,6 +49,7 @@ export const config = (() => {
     workspaceRoot: expand(process.env.DONKAI_WORKSPACE_ROOT ?? "~/donkai-workers"),
     dbPath: expand(process.env.DONKAI_DB_PATH ?? "~/donkai-workers/donkai.sqlite"),
     workerClaudeMd: expand(process.env.WORKER_CLAUDE_MD_PATH ?? "./worker-CLAUDE.md"),
+    workerMcpJson: expand(process.env.WORKER_MCP_JSON_PATH ?? "./worker-mcp.json"),
     claudeModel: process.env.CLAUDE_MODEL ?? "claude-opus-4-7",
     workerTimeoutMs: Number(process.env.WORKER_TIMEOUT_SECS ?? "1800") * 1000,
     tier2Keywords: csv(process.env.TIER2_KEYWORDS).map((s) => s.toLowerCase()),

@@ -13,6 +13,7 @@ export interface IssueSummary {
   url: string;
   stateName: string;
   comments: CommentSummary[];
+  attachments: AttachmentSummary[];
 }
 
 export interface CommentSummary {
@@ -22,12 +23,19 @@ export interface CommentSummary {
   createdAt: string;
 }
 
+export interface AttachmentSummary {
+  title: string;
+  subtitle: string | null;
+  url: string;
+}
+
 async function expandIssue(issue: Issue): Promise<IssueSummary> {
-  const [state, labels, project, comments] = await Promise.all([
+  const [state, labels, project, comments, attachments] = await Promise.all([
     issue.state,
     issue.labels(),
     issue.project,
     issue.comments({ first: 10, orderBy: undefined }),
+    issue.attachments({ first: 25 }),
   ]);
 
   const commentSummaries: CommentSummary[] = await Promise.all(
@@ -46,6 +54,12 @@ async function expandIssue(issue: Issue): Promise<IssueSummary> {
 
   commentSummaries.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
+  const attachmentSummaries: AttachmentSummary[] = attachments.nodes.map((a) => ({
+    title: a.title,
+    subtitle: a.subtitle ?? null,
+    url: a.url,
+  }));
+
   return {
     id: issue.id,
     identifier: issue.identifier,
@@ -57,6 +71,7 @@ async function expandIssue(issue: Issue): Promise<IssueSummary> {
     url: issue.url,
     stateName: state ? state.name : "(unknown)",
     comments: commentSummaries,
+    attachments: attachmentSummaries,
   };
 }
 

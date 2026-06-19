@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import type { CommentSummary, IssueSummary } from "../linear/queries.js";
+import type { AttachmentSummary, CommentSummary, IssueSummary } from "../linear/queries.js";
 
 const priorityNames: Record<number, string> = {
   0: "No priority",
@@ -66,6 +66,7 @@ export function buildTicketPrompt(issue: IssueSummary): string {
   const labels = issue.labels.length ? issue.labels.join(", ") : "none";
   const desc = issue.description.trim() || "No description provided.";
   const commentsBlock = renderComments(issue.comments);
+  const attachmentsBlock = renderAttachments(issue.attachments);
   const autonomy = autonomyInstructionBlock();
   const ident = issue.identifier;
   const baseBranch =
@@ -83,7 +84,7 @@ export function buildTicketPrompt(issue: IssueSummary): string {
 
 ## Description
 ${desc}
-${commentsBlock}
+${commentsBlock}${attachmentsBlock}
 ${autonomy}
 
 ## Instructions
@@ -163,4 +164,18 @@ function renderComments(comments: CommentSummary[]): string {
       `- [${c.author === "bot" ? "Bot" : c.authorName}]: ${c.body.replace(/\n/g, " ").slice(0, 400)}`,
   );
   return `\n## Recent comments\n${lines.join("\n")}\n`;
+}
+
+function renderAttachments(attachments: AttachmentSummary[]): string {
+  if (attachments.length === 0) return "";
+  const lines = attachments.map((a) => {
+    const title = a.title.replace(/\n/g, " ").slice(0, 200);
+    const sub = a.subtitle ? ` — ${a.subtitle.replace(/\n/g, " ").slice(0, 200)}` : "";
+    return `- [${title}](${a.url})${sub}`;
+  });
+  const hasSentry = attachments.some((a) => /sentry\.io/.test(a.url));
+  const sentryHint = hasSentry
+    ? "\n\nA Sentry issue is linked above. Use the Sentry MCP tools (e.g. `get_sentry_resource` with the URL) to pull the stacktrace, tags, and trace context before starting work."
+    : "";
+  return `\n## Attachments\n${lines.join("\n")}${sentryHint}\n`;
 }
