@@ -1,0 +1,9 @@
+node_modules
+src/pwa/node_modules
+src/pwa/dist
+.git
+.env
+*.sqlite
+*.sqlite-*
+worker-CLAUDE.md
+.claude

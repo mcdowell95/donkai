@@ -62,7 +62,15 @@ export function autonomyInstructionBlock(): string {
   }
 }
 
-export function buildTicketPrompt(issue: IssueSummary): string {
+export interface TicketPromptOptions {
+  // Set when the orchestrator already cloned the repo into the workspace.
+  preclonedRepoDir?: string | null;
+}
+
+export function buildTicketPrompt(
+  issue: IssueSummary,
+  opts: TicketPromptOptions = {},
+): string {
   const labels = issue.labels.length ? issue.labels.join(", ") : "none";
   const desc = issue.description.trim() || "No description provided.";
   const commentsBlock = renderComments(issue.comments);
@@ -74,9 +82,13 @@ export function buildTicketPrompt(issue: IssueSummary): string {
       ? config.workflow.devBranch
       : config.workflow.mainBranch;
 
+  const repoStep = opts.preclonedRepoDir
+    ? `Repo already cloned at \`${opts.preclonedRepoDir}\` (origin points at the real remote — fetch/push work). Clone any additional repos you need.`
+    : `Clone the repos you need into this workspace.`;
+
   return `You are working on Linear ticket ${ident} (${issue.url}).
 
-## Ticket details
+## Ticket
 - **Title**: ${issue.title}
 - **Priority**: ${priorityNames[issue.priority] ?? "Medium"}
 - **Labels**: ${labels}
@@ -88,19 +100,17 @@ ${commentsBlock}${attachmentsBlock}
 ${autonomy}
 
 ## Instructions
-1. Tell me your session ID first so I can record it for resume.
-2. Read \`CLAUDE.md\` in this directory for repo context and conventions.
-3. Determine which repos you need. Clone them into this workspace.
-4. Create a feature branch \`feat/${ident.toLowerCase()}-<short-desc>\` from a fresh \`${baseBranch}\` (\`git fetch origin && git checkout ${baseBranch} && git pull --ff-only && git checkout -b feat/...\`).
-5. Implement the work. Commit with clear messages referencing ${ident}.
-6. Open a PR with \`gh pr create --base ${baseBranch}\`.
-7. Run \`gh pr checks <pr-number> --watch --fail-fast\` after every push. Loop on failure, fix, push, re-check.
-8. You may not output DONE until \`gh pr checks\` exits 0. After three consecutive failed runs (or an unfixable failure), output BLOCKED.
-9. If you cannot proceed without human input, output a single line starting with \`BLOCKED:\` followed by what you need.
+- Read \`CLAUDE.md\` here for repo context and conventions.
+- ${repoStep}
+- Branch \`feat/${ident.toLowerCase()}-<short-desc>\` from a fresh \`${baseBranch}\`. Commit referencing ${ident}. Open a PR with \`gh pr create --base ${baseBranch}\`.
+- After every push run \`gh pr checks <pr-number> --watch --fail-fast\`; fix and re-push until green. Three consecutive CI failures (or an unfixable one) → BLOCKED.
 
 ## Output protocol
-- \`DONE: <one-line summary>\` — work complete, CI green, PR open. Include the PR URL.
-- \`BLOCKED: <reason>\` — needs human input. Always commit + push current progress before BLOCKED.
+- \`DONE: <one-line summary>\` — CI green, PR open. Include the PR URL. Never before \`gh pr checks\` exits 0.
+- \`BLOCKED: <reason>\` — needs human input. Commit + push progress first.
+- With DONE, optionally add (only if a future worker would be meaningfully better off knowing it — skip ticket status/project state/anything derivable from code):
+  \`LEARNING: <one tight line for worker-CLAUDE.md>\`
+  \`SECTION: <target section, or "new section: X">\`
 `;
 }
 
@@ -108,12 +118,18 @@ export function buildResumePrompt(
   ticketKey: string,
   comments: CommentSummary[],
   handoverReason?: string,
+  since?: string | null,
 ): string {
-  const thread = comments
+  // The session resumes with its full prior context — only comments newer
+  // than the last worker run are news. Re-sending the whole thread just
+  // burns input tokens.
+  const fresh = since ? comments.filter((c) => c.createdAt > since) : comments;
+
+  const thread = fresh
     .map((c) => `[${c.author === "bot" ? "You (bot)" : c.authorName}]: ${c.body}`)
     .join("\n\n");
 
-  const lastHuman = [...comments].reverse().find((c) => c.author === "human");
+  const lastHuman = [...fresh].reverse().find((c) => c.author === "human");
   const action = lastHuman
     ? `The most recent human message is:\n"${lastHuman.body}"\n\nAct on this now.`
     : "Continue where you left off.";
@@ -124,9 +140,9 @@ export function buildResumePrompt(
 
   return `You are resuming work on Linear ticket ${ticketKey}.
 
-Recent comment thread (oldest first):
+New comments since your last run (oldest first):
 
-${thread || "(no recent comments)"}
+${thread || "(none)"}
 ${handover}
 ---
 ${action}

@@ -25,7 +25,9 @@ import {
   extractTestingSteps,
 } from "../worker/parse.js";
 import { setupWorkspace, teardownWorkspace } from "./workspace.js";
-import { harvestLearnings } from "./harvest.js";
+import { harvestFromOutput, harvestLearnings } from "./harvest.js";
+import { precloneForTicket } from "./mirrors.js";
+import { notify } from "../api/push.js";
 import {
   attemptMerge,
   evaluateGuards,
@@ -40,7 +42,7 @@ export async function handleNewTicket(issue: IssueSummary): Promise<void> {
   console.log(`▶ New ticket: ${key} — ${issue.title}`);
   logEvent(key, "ticket_pickup", { title: issue.title });
 
-  const workspace = setupWorkspace(key);
+  const workspace = setupWorkspace(key, issue);
   const repo = inferRepo(issue);
   const state: WorkerState = {
     ...newState({
@@ -60,7 +62,8 @@ export async function handleNewTicket(issue: IssueSummary): Promise<void> {
     `🤖 Donkai picked up this ticket. Working in \`${workspace}\`.`,
   );
 
-  const prompt = buildTicketPrompt(issue);
+  const preclonedRepoDir = await precloneForTicket(repo, workspace);
+  const prompt = buildTicketPrompt(issue, { preclonedRepoDir });
   const result = await runWorker({ ticketKey: key, workspace, prompt });
 
   state.session_id = result.sessionId;
@@ -85,7 +88,12 @@ export async function handleResumedTicket(issue: IssueSummary): Promise<void> {
   state.status = "running";
   upsertSession(state);
 
-  const prompt = buildResumePrompt(key, issue.comments);
+  const prompt = buildResumePrompt(
+    key,
+    issue.comments,
+    undefined,
+    state.last_worker_finished_at,
+  );
   const result = await runWorker({
     ticketKey: key,
     workspace: state.workspace_dir,
@@ -141,6 +149,7 @@ export async function handleRelease(state: WorkerState, issue: IssueSummary): Pr
     key,
     issue.comments,
     "A human took over this session directly to redirect or unstick you. They have now released control back to Donkai. Assess the current state of files, branch, and PR before continuing.",
+    state.last_worker_finished_at,
   );
 
   await addComment(issue.id, "🤖 Donkai resuming after human takeover.");
@@ -165,15 +174,18 @@ async function finaliseResult(
 ): Promise<void> {
   const key = state.ticket_key;
   state.status = mapOutcomeToStatus(result.outcome);
+  state.last_worker_finished_at = new Date().toISOString();
 
   if (result.outcome === "done") {
     state.pr_urls = extractPrUrls(result.output);
-    if (state.session_id) {
-      try {
+    try {
+      // Piggyback first (free); separate-mode harvest self-gates on config.
+      const captured = harvestFromOutput(key, result.output);
+      if (!captured && state.session_id) {
         await harvestLearnings(key, state.session_id, state.workspace_dir!);
-      } catch (err) {
-        console.warn(`  harvest failed (non-fatal): ${err}`);
       }
+    } catch (err) {
+      console.warn(`  harvest failed (non-fatal): ${err}`);
     }
     await handleDoneOutcome(state, issue, result);
   } else if (result.outcome === "blocked_local") {
@@ -187,6 +199,31 @@ async function finaliseResult(
   }
 
   upsertSession(state);
+  notifyOutcome(state, result);
+}
+
+function notifyOutcome(state: WorkerState, result: WorkerResult): void {
+  const key = state.ticket_key;
+  switch (result.outcome) {
+    case "done":
+      if (state.status === "merged") {
+        notify("merged", key, `${key} auto-merged ✅`);
+      } else {
+        notify("done", key, `${key} done — ${extractDoneSummary(result.output).slice(0, 120)}`);
+      }
+      break;
+    case "blocked_local":
+      notify("blocked", key, `${key} needs your input: ${(state.pending_question ?? "").slice(0, 140)}`);
+      break;
+    case "blocked_linear":
+      notify("blocked", key, `${key} needs action in Linear: ${extractBlocked(result.output).slice(0, 140)}`);
+      break;
+    case "error":
+      notify("error", key, `${key} errored — check logs`);
+      break;
+    case "detached":
+      break;
+  }
 }
 
 async function handleDoneOutcome(

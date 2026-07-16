@@ -12,3 +12,6 @@ donkai.sqlite-journal
 donkai.sqlite-wal
 donkai.sqlite-shm
 .idea
+worker-CLAUDE.md.caveman
+src/pwa/dist/
+src/pwa/node_modules/

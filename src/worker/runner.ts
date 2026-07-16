@@ -18,6 +18,8 @@ export interface RunOptions {
   workspace: string;
   prompt: string;
   resumeSessionId?: string | null;
+  // Per-run model override (e.g. cheap model for separate-mode harvest).
+  model?: string;
 }
 
 export async function runWorker(opts: RunOptions): Promise<WorkerResult> {
@@ -63,9 +65,12 @@ export async function runWorker(opts: RunOptions): Promise<WorkerResult> {
       options: {
         cwd: workspace,
         resume: resumeSessionId ?? undefined,
-        model: config.claudeModel,
+        model: opts.model ?? config.claudeModel,
         permissionMode: "default",
         abortController: controller,
+        ...(config.claudeCodeExecutable
+          ? { pathToClaudeCodeExecutable: config.claudeCodeExecutable }
+          : {}),
       },
     });
 

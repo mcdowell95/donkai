@@ -74,3 +74,12 @@ export function parseHarvestProposal(output: string): HarvestProposal | null {
     section: propMatch[2]!.trim().split("\n")[0]!.trim(),
   };
 }
+
+// Piggyback harvest: `LEARNING: <line>` (+ optional `SECTION: <name>`) emitted
+// inline with DONE — no separate harvest worker run needed.
+export function parseInlineLearning(output: string): HarvestProposal | null {
+  const learning = extractLabeledBlock(output, "LEARNING");
+  if (!learning) return null;
+  const section = output.match(/(?:^|\n)SECTION:[ \t]*(.+)/i)?.[1]?.trim();
+  return { proposal: learning, section: section || "General" };
+}

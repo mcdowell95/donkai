@@ -22,3 +22,12 @@ dashboard: ## Run dashboard only
 
 typecheck: ## Static type-check the project
 	pnpm typecheck
+
+smoke: ## Run API/MCP smoke test against a scratch DB
+	SMOKE_DIR=$${TMPDIR:-/tmp}/donkai-smoke-$$$$ pnpm exec tsx scripts/smoke.mts
+
+pwa: ## Build the PWA bundle
+	pnpm --dir src/pwa install && pnpm --dir src/pwa build
+
+docker: ## Build the Docker image
+	docker build -t donkai:latest .

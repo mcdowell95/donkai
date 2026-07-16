@@ -40,7 +40,7 @@ function renderCard(s: WorkerState): string {
     <div class="pending">
       <div class="pending-label">Awaiting response:</div>
       <div class="pending-body">${escape(s.pending_question)}</div>
-      <form hx-post="/api/respond/${escape(s.ticket_key)}" hx-target="closest .card" hx-swap="outerHTML">
+      <form hx-post="/classic/api/respond/${escape(s.ticket_key)}" hx-target="closest .card" hx-swap="outerHTML">
         <textarea name="response" rows="3" placeholder="Your answer for Claude..."></textarea>
         <button type="submit">Send & resume</button>
       </form>
@@ -62,7 +62,7 @@ function renderCard(s: WorkerState): string {
     </div>
     ${pending}
     <footer>
-      <a class="log-link" href="/logs/${escape(s.ticket_key)}">View logs</a>
+      <a class="log-link" href="/classic/logs/${escape(s.ticket_key)}">View logs</a>
       ${actions}
     </footer>
   </article>`;
@@ -70,7 +70,7 @@ function renderCard(s: WorkerState): string {
 
 function renderActions(s: WorkerState): string {
   const t = (action: string, label: string) =>
-    `<button hx-post="/api/${action}/${escape(s.ticket_key)}" hx-target="closest .card" hx-swap="outerHTML">${label}</button>`;
+    `<button hx-post="/classic/api/${action}/${escape(s.ticket_key)}" hx-target="closest .card" hx-swap="outerHTML">${label}</button>`;
   switch (s.status) {
     case "running":
       return t("takeover", "Takeover");

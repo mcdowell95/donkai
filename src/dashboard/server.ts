@@ -37,7 +37,7 @@ export function buildDashboard(): Hono {
     const sessions = listSessions();
     const body = `
       <section
-        hx-get="/fragments/workers"
+        hx-get="/classic/fragments/workers"
         hx-trigger="every 3s"
         hx-target="this"
         hx-swap="innerHTML">
@@ -58,11 +58,11 @@ export function buildDashboard(): Hono {
       <div class="log-header">
         <h2>${escape(key)} — ${escape(s.summary ?? "")}</h2>
         <div class="log-sub">workspace: <code>${escape(s.workspace_dir ?? "(none)")}</code> · status: <span class="status">${escape(s.status)}</span></div>
-        <a class="tab" href="/">← back</a>
+        <a class="tab" href="/classic">← back</a>
       </div>
       <section
         class="log-stream"
-        hx-get="/fragments/logs/${escape(key)}"
+        hx-get="/classic/fragments/logs/${escape(key)}"
         hx-trigger="load, every 2s"
         hx-target="this"
         hx-swap="innerHTML">
@@ -141,10 +141,10 @@ export function buildDashboard(): Hono {
           <header><span class="ticket">${escape(r.ticket_key)}</span><span class="status">${escape(parsed.section)}</span></header>
           <pre>${escape(parsed.proposal)}</pre>
           <footer>
-            <form hx-post="/api/learnings/${r.id}/accept" hx-target="closest .card" hx-swap="outerHTML">
+            <form hx-post="/classic/api/learnings/${r.id}/accept" hx-target="closest .card" hx-swap="outerHTML">
               <button>Accept</button>
             </form>
-            <form hx-post="/api/learnings/${r.id}/reject" hx-target="closest .card" hx-swap="outerHTML">
+            <form hx-post="/classic/api/learnings/${r.id}/reject" hx-target="closest .card" hx-swap="outerHTML">
               <button>Reject</button>
             </form>
           </footer>
