@@ -1,6 +1,14 @@
 #!/bin/sh
 set -e
 
+# Named volumes mount root-owned, shadowing the image's /data ownership.
+# Fix it while still root, then drop privileges for everything else.
+if [ "$(id -u)" = "0" ]; then
+  mkdir -p /data
+  chown -R donkai:donkai /data
+  exec runuser -u donkai -- "$0" "$@"
+fi
+
 # gh reads GH_TOKEN from env natively; wire git to use gh as its credential
 # helper so workers can clone/push private HTTPS remotes without prompts.
 if [ -n "$GH_TOKEN" ]; then

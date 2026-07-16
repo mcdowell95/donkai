@@ -39,7 +39,9 @@ RUN useradd -m -d /home/donkai donkai \
   && mkdir -p /data \
   && chown -R donkai:donkai /data /app
 
-USER donkai
+# No USER directive: the entrypoint starts as root to chown the mounted /data
+# volume (named volumes arrive root-owned, shadowing the build-time chown),
+# then drops to the donkai user before exec'ing the app.
 
 EXPOSE 8346
 
