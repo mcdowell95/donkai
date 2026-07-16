@@ -153,6 +153,34 @@ function migrate(d: Database.Database): void {
       stage_entered_at TEXT,
       created_at   TEXT NOT NULL
     );
+
+    -- Orchestrator runtime settings (paused flag, last tick heartbeat, ...).
+    CREATE TABLE IF NOT EXISTS settings (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    -- Auto-pickup criteria. A ready ticket is picked up when ANY enabled rule
+    -- matches ALL of its set fields (OR of ANDs). Empty table = legacy
+    -- behavior (assignee / LINEAR_PICKUP_LABEL filter only).
+    CREATE TABLE IF NOT EXISTS pickup_rules (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      enabled          INTEGER NOT NULL DEFAULT 1,
+      team_key         TEXT,
+      label            TEXT,
+      max_priority_num INTEGER,  -- Linear: 1=Urgent..4=Low; matches 1..N (0/None never matches)
+      repo             TEXT,
+      note             TEXT,
+      created_at       TEXT NOT NULL
+    );
+
+    -- Web-push subscriptions for the PWA.
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint   TEXT PRIMARY KEY,
+      keys_json  TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Lightweight column adds for installs that pre-date the staging_promote
@@ -162,6 +190,8 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, "dev_deploy_waits", "stage_entered_at", "TEXT");
   addColumnIfMissing(d, "dev_deploy_waits", "testing_steps", "TEXT");
   addColumnIfMissing(d, "dev_deploy_waits", "release_notes", "TEXT");
+  addColumnIfMissing(d, "pending_queue", "manual_order", "INTEGER");
+  addColumnIfMissing(d, "sessions", "last_worker_finished_at", "TEXT");
 }
 
 function addColumnIfMissing(

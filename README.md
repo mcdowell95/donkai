@@ -58,7 +58,47 @@ pnpm orchestrator   # orchestrator only
 pnpm dashboard      # dashboard only
 ```
 
-Dashboard: http://localhost:8346
+Dashboard: http://localhost:8346 (PWA) · http://localhost:8346/classic (HTMX fallback)
+
+## HTTP surface
+
+One Hono server on `DASHBOARD_PORT` serves everything:
+
+| Path | What | Auth |
+|---|---|---|
+| `/` | Mobile PWA (installable, web push) | token entered in-app (Bearer to API) |
+| `/api/v1/*` | JSON control API | `Authorization: Bearer $DONKAI_AUTH_TOKEN` |
+| `/mcp` | MCP server (streamable HTTP) | Bearer token |
+| `/mcp/<MCP_PATH_SECRET>` | Same, for claude.ai custom connectors (no header support there — the URL is the credential) | secret path |
+| `/webhooks/linear` | Linear webhook doorbell (cuts pickup latency to ~2 s) | HMAC via `LINEAR_WEBHOOK_SECRET` |
+| `/classic/*` | Original HTMX dashboard | basic auth via `DASHBOARD_TOKEN` |
+| `/healthz` | Liveness + orchestrator heartbeat (stale tick ⇒ 503) | none |
+
+## Phone access
+
+**PWA:** open the deployed URL on your phone → Add to Home Screen → paste `DONKAI_AUTH_TOKEN` once. Enable push in Settings (needs `VAPID_*` keys, `npx web-push generate-vapid-keys`). You get pushes when a worker blocks, finishes, merges, or errors; pause/resume, reorder the queue, answer blocked workers, and edit pickup rules from the couch or the pub.
+
+**claude.ai (MCP):** set `MCP_PATH_SECRET`, then claude.ai → Settings → Connectors → Add custom connector → `https://<domain>/mcp/<secret>`. Works in the Claude iOS/Android app: "what's donkai doing?", "move ENG-42 to the front", "pause processing", "answer the blocked worker: use approach B". 11 tools: status, list_queue, reorder_queue, pause, resume, ticket, answer_blocked, retry, costs, set_pickup_rules, deploy.
+
+## Deploying on Coolify
+
+Dockerfile included (node:20 + git + gh + Claude Code CLI preinstalled).
+
+1. Coolify → new app → this repo → build pack **Dockerfile**, port **8346**.
+2. Persistent volume mounted at **/data** (SQLite + workspaces + repo mirrors live there).
+3. Env vars: everything from `.env`, plus `DONKAI_AUTH_TOKEN`, `GH_TOKEN` (fine-grained PAT, contents+PR on target repos), and `ANTHROPIC_API_KEY` **or** `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` on a trusted machine). Put `worker-CLAUDE.md` on the volume and set `WORKER_CLAUDE_MD_PATH=/data/worker-CLAUDE.md`.
+4. Domain + auto-HTTPS, healthcheck path `/healthz`.
+5. Optional: Linear webhook → `https://<domain>/webhooks/linear` (Issues category) + `LINEAR_WEBHOOK_SECRET`.
+
+> ⚠️ Trust model: workers execute repo code inside the same container as the orchestrator, with `GH_TOKEN`/`LINEAR_API_KEY` in env — same as running on your Mac, now on a server. Keep the target-repo set trusted.
+
+## Token/latency diet (vs v1)
+
+- **Harvest piggybacks** on the worker's DONE output (`HARVEST_MODE=piggyback`) — one full worker call per ticket eliminated.
+- **Delta resumes**: only comments newer than the last run are re-sent (the session already holds the thread).
+- **Per-ticket MCP selection**: workers load only `MCP_ALWAYS_SERVERS` + servers the ticket mentions (Sentry attachment ⇒ sentry server), not every server's tool schemas every turn.
+- **Repo mirror cache** (`GIT_REMOTE_BASE`): tickets pre-clone from a local bare mirror; workers skip the network clone and the tokens narrating it.
+- **Compressed worker context**: point `WORKER_CLAUDE_MD_COMPRESSED_PATH` at a caveman-compressed copy of `worker-CLAUDE.md`.
 
 ## Linear workflow setup
 

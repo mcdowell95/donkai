@@ -27,6 +27,9 @@ import {
   pollProdPromotions,
   pollRollingMainPrs,
 } from "./staging.js";
+import { onWake } from "../control/actions.js";
+import { isPaused, recordTick } from "../control/settings.js";
+import { matchesRules } from "../control/rules.js";
 
 const inflight = new Set<string>();
 
@@ -77,6 +80,7 @@ export async function startOrchestrator(): Promise<void> {
 }
 
 async function tick(): Promise<void> {
+  recordTick();
   await drainTakeoverSignals();
   await drainReleaseSignals();
   await drainResponseSignals();
@@ -86,6 +90,10 @@ async function tick(): Promise<void> {
     await pollRollingMainPrs();
     await pollProdPromotions();
   }
+  // Pause gates new pickups and worker starts only. In-flight workers,
+  // staging polls, and blocked-answer handling above keep running so
+  // half-finished pipelines aren't stranded.
+  if (isPaused()) return;
   await pollReady();
   await pollResumed();
   scheduleFromQueue();
@@ -171,10 +179,21 @@ async function checkHumanWaitTickets(): Promise<void> {
   }
 }
 
+const loggedFiltered = new Set<string>();
+
 async function pollReady(): Promise<void> {
   const issues = await findReadyIssues();
   for (const issue of issues) {
     if (alreadyQueuedOrRunning(issue.identifier)) continue;
+    if (!matchesRules(issue)) {
+      if (!loggedFiltered.has(issue.identifier)) {
+        loggedFiltered.add(issue.identifier);
+        console.log(`  ⛔ ${issue.identifier} skipped by pickup rules`);
+        logEvent(issue.identifier, "pickup_filtered");
+      }
+      continue;
+    }
+    loggedFiltered.delete(issue.identifier);
     const repo = inferRepo(issue);
     upsertSession({
       ...newState({
@@ -230,12 +249,21 @@ async function runWithGuard(ticketKey: string, fn: () => Promise<void>): Promise
 
 async function sleepUntilSignalOrInterval(): Promise<void> {
   const start = Date.now();
-  while (Date.now() - start < config.pollIntervalMs) {
-    await new Promise((r) => setTimeout(r, 500));
-    if (hasAnyPendingSignal()) {
-      console.log("  IPC signal detected, waking up early");
-      return;
+  let woken = false;
+  const off = onWake((reason) => {
+    console.log(`  wake: ${reason}`);
+    woken = true;
+  });
+  try {
+    while (!woken && Date.now() - start < config.pollIntervalMs) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (hasAnyPendingSignal()) {
+        console.log("  IPC signal detected, waking up early");
+        return;
+      }
     }
+  } finally {
+    off();
   }
 }
 

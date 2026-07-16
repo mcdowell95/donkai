@@ -1,9 +1,17 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.js";
+import type { IssueSummary } from "../linear/queries.js";
 
 const SETTINGS = {
-  enableAllProjectMcpServers: true,
+  enableAllProjectMcpServers: false,
   permissions: {
     allow: [
       "Read",
@@ -99,24 +107,75 @@ const SETTINGS = {
   },
 };
 
-export function setupWorkspace(ticketKey: string): string {
+export function setupWorkspace(ticketKey: string, issue?: IssueSummary): string {
   const slug = ticketKey.replace(/-/g, "_").toLowerCase();
   const workspace = join(config.workspaceRoot, slug);
   mkdirSync(workspace, { recursive: true });
 
-  if (existsSync(config.workerClaudeMd)) {
-    copyFileSync(config.workerClaudeMd, join(workspace, "CLAUDE.md"));
+  // Prefer the caveman-compressed context file when configured — it is
+  // injected into every worker turn, so size matters.
+  const claudeMdSource =
+    config.workerClaudeMdCompressed && existsSync(config.workerClaudeMdCompressed)
+      ? config.workerClaudeMdCompressed
+      : config.workerClaudeMd;
+  if (existsSync(claudeMdSource)) {
+    copyFileSync(claudeMdSource, join(workspace, "CLAUDE.md"));
   }
 
-  if (existsSync(config.workerMcpJson)) {
-    copyFileSync(config.workerMcpJson, join(workspace, ".mcp.json"));
-  }
+  const enabledServers = writeFilteredMcpJson(workspace, issue);
 
   const claudeDir = join(workspace, ".claude");
   mkdirSync(claudeDir, { recursive: true });
-  writeFileSync(join(claudeDir, "settings.local.json"), JSON.stringify(SETTINGS, null, 2));
+  writeFileSync(
+    join(claudeDir, "settings.local.json"),
+    JSON.stringify({ ...SETTINGS, enabledMcpjsonServers: enabledServers }, null, 2),
+  );
 
   return workspace;
+}
+
+// Every MCP server a worker loads costs system-prompt tokens for its full tool
+// schemas on every turn. Only ship the servers this ticket plausibly needs:
+// the MCP_ALWAYS_SERVERS set, plus any server whose name is mentioned in the
+// ticket (title/description/labels/attachment URLs) — which covers the Sentry
+// attachment case (sentry.io URL mentions "sentry").
+function writeFilteredMcpJson(workspace: string, issue?: IssueSummary): string[] {
+  if (!existsSync(config.workerMcpJson)) return [];
+  let parsed: { mcpServers?: Record<string, unknown> };
+  try {
+    parsed = JSON.parse(readFileSync(config.workerMcpJson, "utf-8"));
+  } catch {
+    copyFileSync(config.workerMcpJson, join(workspace, ".mcp.json"));
+    return [];
+  }
+  const all = parsed.mcpServers ?? {};
+  const always = new Set(config.mcpAlwaysServers.map((s) => s.toLowerCase()));
+
+  const haystack = issue
+    ? [
+        issue.title,
+        issue.description,
+        ...issue.labels,
+        ...issue.attachments.map((a) => `${a.title} ${a.url}`),
+      ]
+        .join(" ")
+        .toLowerCase()
+    : "";
+
+  const selected: Record<string, unknown> = {};
+  for (const [name, server] of Object.entries(all)) {
+    const lower = name.toLowerCase();
+    // No issue context (shouldn't happen on the new-ticket path): ship all.
+    if (!issue || always.has(lower) || haystack.includes(lower)) {
+      selected[name] = server;
+    }
+  }
+
+  writeFileSync(
+    join(workspace, ".mcp.json"),
+    JSON.stringify({ ...parsed, mcpServers: selected }, null, 2),
+  );
+  return Object.keys(selected);
 }
 
 export function teardownWorkspace(workspaceDir: string | null): void {

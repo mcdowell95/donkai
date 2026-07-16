@@ -25,6 +25,7 @@ export interface WorkerState {
   branch_name: string | null;
   repo: string | null;
   pr_urls: string[];
+  last_worker_finished_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -40,6 +41,7 @@ interface SessionRow {
   branch_name: string | null;
   repo: string | null;
   pr_urls: string | null;
+  last_worker_finished_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +58,7 @@ function rowToState(row: SessionRow): WorkerState {
     branch_name: row.branch_name,
     repo: row.repo,
     pr_urls: row.pr_urls ? (JSON.parse(row.pr_urls) as string[]) : [],
+    last_worker_finished_at: row.last_worker_finished_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -82,10 +85,12 @@ export function upsertSession(state: WorkerState): void {
     .prepare(
       `INSERT INTO sessions (
          ticket_key, issue_id, session_id, workspace_dir, status, summary,
-         pending_question, branch_name, repo, pr_urls, created_at, updated_at
+         pending_question, branch_name, repo, pr_urls, last_worker_finished_at,
+         created_at, updated_at
        ) VALUES (
          @ticket_key, @issue_id, @session_id, @workspace_dir, @status, @summary,
-         @pending_question, @branch_name, @repo, @pr_urls, @created_at, @updated_at
+         @pending_question, @branch_name, @repo, @pr_urls, @last_worker_finished_at,
+         @created_at, @updated_at
        )
        ON CONFLICT(ticket_key) DO UPDATE SET
          issue_id        = excluded.issue_id,
@@ -97,6 +102,7 @@ export function upsertSession(state: WorkerState): void {
          branch_name     = excluded.branch_name,
          repo            = excluded.repo,
          pr_urls         = excluded.pr_urls,
+         last_worker_finished_at = excluded.last_worker_finished_at,
          updated_at      = excluded.updated_at`,
     )
     .run({
@@ -124,6 +130,7 @@ export function newState(opts: {
     branch_name: null,
     repo: opts.repo ?? null,
     pr_urls: [],
+    last_worker_finished_at: null,
     created_at: now,
     updated_at: now,
   };

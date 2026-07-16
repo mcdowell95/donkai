@@ -6,12 +6,12 @@ export function layout(title: string, body: string, active: string = "home"): st
     : "";
 
   const tabs = [
-    { key: "home", label: "Workers", href: "/" },
-    { key: "queue", label: "Queue", href: "/queue" },
-    { key: "merges", label: "Merges", href: "/merges" },
-    { key: "learnings", label: "Learnings", href: "/learnings" },
-    { key: "costs", label: "Costs", href: "/costs" },
-    { key: "events", label: "Events", href: "/events" },
+    { key: "home", label: "Workers", href: "/classic" },
+    { key: "queue", label: "Queue", href: "/classic/queue" },
+    { key: "merges", label: "Merges", href: "/classic/merges" },
+    { key: "learnings", label: "Learnings", href: "/classic/learnings" },
+    { key: "costs", label: "Costs", href: "/classic/costs" },
+    { key: "events", label: "Events", href: "/classic/events" },
   ];
 
   const tabHtml = tabs
@@ -26,7 +26,7 @@ export function layout(title: string, body: string, active: string = "home"): st
 <head>
   <meta charset="utf-8" />
   <title>${escape(title)} — Donkai</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/classic/static/style.css" />
   <script src="https://unpkg.com/htmx.org@1.9.12" crossorigin="anonymous"></script>
 </head>
 <body>

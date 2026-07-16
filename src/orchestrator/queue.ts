@@ -15,6 +15,7 @@ interface QueueRow {
   issue_id: string;
   repo: string | null;
   priority: number | null;
+  manual_order: number | null;
   created_at: string;
 }
 
@@ -62,7 +63,8 @@ export function listQueue(): QueueRow[] {
   return db()
     .prepare<[], QueueRow>(
       `SELECT * FROM pending_queue
-        ORDER BY COALESCE(priority, 99) ASC, created_at ASC`,
+        ORDER BY COALESCE(manual_order, 1000000000) ASC,
+                 COALESCE(priority, 99) ASC, created_at ASC`,
     )
     .all();
 }
